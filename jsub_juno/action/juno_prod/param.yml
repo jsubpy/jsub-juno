@@ -1,4 +1,4 @@
-executable: juno_detsim.sh
+executable: juno_prod.sh
 stdout: std.out
 stderr: std.err
 cpu_core: 0

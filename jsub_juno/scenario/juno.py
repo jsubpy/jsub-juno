@@ -1,7 +1,7 @@
 import os
 import ast
 from jsub.error import JsubError
-from copy import copy
+from copy import copy,deepcopy
 import glob
 from random import randint
 
@@ -28,7 +28,12 @@ class Juno(object):
 			junoTop = '/cvmfs/juno.ihep.ac.cn/sl6_amd64_gcc494/Pre-Release/J19v1r0-Pre3'
 		else:
 			softVersion = self.scenario_input.get('softVersion')
-			junoTop_list = glob.glob('/cvmfs/juno.ihep.ac.cn/*/*/%s/'%softVersion)
+			junoTop_list = []
+			junoTop_list.extend(glob.glob('/%s/'%softVersion))
+			junoTop_list.extend(glob.glob('/cvmfs/%s/'%softVersion))
+			junoTop_list.extend(glob.glob('/cvmfs/juno.ihep.ac.cn/%s/'%softVersion))
+			junoTop_list.extend(glob.glob('/cvmfs/juno.ihep.ac.cn/*/%s/'%softVersion))
+			junoTop_list.extend(glob.glob('/cvmfs/juno.ihep.ac.cn/*/*/%s/'%softVersion))
 			if not junoTop_list:
 				raise JunoScenarioError('No suitable environment on /cvmfs/ for JUNO version:%s'%softVersion)
 			else:
@@ -43,6 +48,7 @@ class Juno(object):
 
 		# general setting
 		outputSubDir= self.scenario_input.get('outputSubDir','')
+		outputDir= self.scenario_input.get('outputDir','')
 		# users may define evtmax in splitter for their conveniences, or in general setting
 		evtMax=splitter.get('evtMax',10)
 		evtMax=splitter.get('evtMaxPerJob',evtMax)
@@ -63,11 +69,17 @@ class Juno(object):
 		
 
 		splitterMode=splitter.get('mode','splitByEvent')
-		if splitterMode in ['splitByEvent']:
+		if splitterMode in ['splitByEvent','spliteByEvent','spliteByEvents','spliteByEvent']:
+			splitterMode='splitByEvent'
 			jobvarsToSeq={}
 			jobvars={}
-		elif splitterMode in ['splitByJobvars']:
-			jobvar_lists=splitter.get('jobvar_lists',{})
+		elif splitterMode in ['splitByJobvars','splitByJobvar','spliteByJobvar','spliteByJobvars']:
+			splitterMode='splitByJobvars'
+			if 'jobvarLists' in splitter:
+				splitter['jobvar_lists']=splitter['jobvarLists']
+			jobvar_lists=splitter.get('jobvar_lists')
+			if not jobvar_lists:
+				raise JunoScenarioError('Jobvar lists not defined in the splitter.')
 		else:
 			raise JunoScenarioError('Invalid splitter mode: %s'%splitterMode)
 
@@ -75,94 +87,207 @@ class Juno(object):
 		# build workflow
 		workflow={}
 		previous_steps=[]
-		for step in job_steps:
-			step=step.lower()
-			p_steps=copy(previous_steps)	#copy to avoid further modification on the same object
+		input_map={'elecsim':'detsim','calib':'elecsim','rec':'calib','rec_woelec':'calib','calib_woelec':'detsim'}
+		dirac_upload_file_list=[]
+		alg_counter=0	# idx of jobvar in algs
 
-			workflow[step]={'type':'juno_prod','actvar':{'step_type':step},'depend_on':p_steps}
+
+				
+
+		for step in job_steps:
+
+#			step=step.lower()
+			p_steps=copy(previous_steps)	#copy to avoid further modification on the same object
 			previous_steps+=[step]
 
 			# apply default settings:
 			step_setting=workflow_input.get(step,{})
 
-			
-			#	1. soft version should come from general setting
-			workflow[step]['actvar']['JUNO_top'] = junoTop
-			#	2. evtmax should come from general setting; or overwrited by step setting
-			s_evtMax = step_setting.get('evtMax',evtMax)
-			s_evtMax = step_setting.get('evtMaxPerJob',s_evtMax)
-			workflow[step]['actvar']['evtmax'] = s_evtMax
+			if step in ['detsim','elecsim','calib','rec','calib_woelec','rec_woelec']:
+
+				workflow[step]={'type':'juno_prod','actvar':{'step_type':step},'depend_on':p_steps}
+
+
+				
+				#	1. soft version should come from general setting
+				workflow[step]['actvar']['JUNO_top'] = junoTop
+				#	2. evtmax should come from general setting; or overwrited by step setting
+				s_evtMax = step_setting.get('evtMax',evtMax)
+				s_evtMax = step_setting.get('evtMaxPerJob',s_evtMax)
+				workflow[step]['actvar']['evtmax'] = s_evtMax
 	
-			#redirect output in step to ./ on WN
-			if backend['name']=='dirac':
-				workflow[step]['actvar']['dirac_output']='True'			
+				#redirect output in step to ./ on WN
+				if backend['name']=='dirac':
+					workflow[step]['actvar']['dirac_output']='True'			
 
-				
+						
+				# deal with aliases
+				if 'userOutput' in step_setting:	
+					step_setting['user_output']=step_setting['userOutput']
+				if 'additionalArgs' in step_setting:	
+					step_setting['additional_args']=step_setting['additionalArgs']
+				if 'fullArgs' in step_setting:	
+					step_setting['full_args']=step_setting['fullArgs']
 
-			# resolve input from previous steps
-			input_map={'elecsim':'detsim','calib':'elecsim','rec':'calib','rec_woelec':'calib','calib_woelec':'detsim'}
-			rand = randint(0,200000000)	#use rand to assure unique seed
+				# resolve input from previous steps
+				rand = randint(0,200000000)	#use rand to assure unique seed
 
-			if splitterMode in ['splitByEvent']:
-				if step in input_map:
-					jobvarsToSeq.update({step+'_input_jobvar':input_map[step]})
-				jobvarsToSeq.update({step+'_output_jobvar':step})
-				jobvarsToSeq.update({step+'_user_output_jobvar':step+'_user'})
-				for attribute in ['additional_args','positions','particles','momentums','material','volume']:
-					if attribute in step_setting:
-						workflow[step]['actvar'][step+'_'+attribute+'_jobvar']=step_setting.get(attribute)
-				
-				# seed
-				seed = step_setting.get('seed',rand)
-				jobvarsToSeq.update({step+'_seed_jobvar':seed})
+				if splitterMode in ['splitByEvent']:
+					if step in input_map:
+						jobvarsToSeq.update({step+'_input_jobvar':input_map[step]})
+					jobvarsToSeq.update({step+'_output_jobvar':step})
+					jobvarsToSeq.update({step+'_user_output_jobvar':step+'_user'})
+					for attribute in ['additional_args','full_args','positions','particles','momentums','material','volume']:
+						if attribute in step_setting:
+							workflow[step]['actvar'][step+'_'+attribute+'_jobvar']=step_setting.get(attribute)
+					
+					# seed
+					seed = step_setting.get('seed',rand)
+					jobvarsToSeq.update({step+'_seed_jobvar':seed})
 
-			elif splitterMode in ['splitByJobvars']:
-				jobvar_lists=splitter.get('jobvar_lists',{})
+				elif splitterMode in ['splitByJobvars']:
+					# seed setting
+					if 'seed' not in step_setting:
+						splitter['jobvar_lists'][step+'_seed_jobvar']={'type':'range','param':{'first':rand,'step':1}}
+					else:
+						splitter['jobvar_lists'][step+'_seed_jobvar']={'type':'composite_string','param':{'value': step_setting.get('seed')}}
+
+
+					
+
+					splitter['jobvar_lists']['univ_index']={'type':'range','param':{'first':0}}
+
+					# use seed for output/user-output names if not specified
+					if 'output' not in step_setting:
+						step_setting['output']='%s_$(univ_index)'%(step)
+					if 'user_output' not in step_setting:
+						step_setting['user_output']='%s_$(univ_index).user'%(step)
+					# get input from previous steps
+					if (step in input_map) and (input_map[step] in previous_steps):	
+						step_setting['input']=workflow_input.get(input_map[step])['output']
+					
+
+					# validate step setting;
+					if step=='detsim':
+						check_step(step,step_setting,['output','user_output'])
+					elif step=='elecsim':
+						check_step(step,step_setting,['input','output','user_output'])
+					elif step=='calib':
+						check_step(step,step_setting,['input','output','user_output'])
+					elif step=='rec':
+						check_step(step,step_setting,['input','output'])
+					elif step=='calib_woelec':
+						check_step(step,step_setting,['input','output'])
+					elif step=='rec_woelec':
+						check_step(step,step_setting,['input','output'])
 		
-				# seed setting
-				if 'seed' not in step_setting:
-					splitter['jobvar_lists'][step+'_seed_jobvar']={'type':'range','param':{'first':rand,'step':1}}
-				else:
-					splitter['jobvar_lists'][step+'_seed_jobvar']={'type':'composite_string','param':{'value': step_setting.get('seed')}}
+					# if with jobvar splitter, translate some settings to composite_string jobvars
+					for attribute in ['input','output','user_output','additional_args','full_args','positions','particles','momentums','volume','material']:
+						if attribute in step_setting:
+							splitter['jobvar_lists'][step+'_'+attribute+'_jobvar']={'type':'composite_string','param':{'value':step_setting.get(attribute)}}
 
-				# use seed for output/user-output names if not specified
-				if 'output' not in step_setting:
-					step_setting['output']='%s_$(%s_seed_jobvar)'%(step,step)
-				if 'user_output' not in step_setting:
-					step_setting['user_output']='%s_user_$(%s_seed_jobvar)'%(step,step)
-				# get input from previous steps
-				if (step in input_map) and (input_map[step] in previous_steps):	
-					step_setting['input']=workflow_input.get(input_map[step])['output']
 				
+				# other necessary args for certain steps
+				if  step == 'elecsim':
+					workflow[step]['actvar']['rate'] = step_setting.get('rate',1)
+				if 'gdml-file' in step_setting:
+					workflow[step]['actvar']['gdml-file'] = step_setting.get('gdml-file')
 
-				# validate step setting;
-				if step=='detsim':
-					check_step(step,step_setting,['output','user_output'])
-				elif step=='elecsim':
-					check_step(step,step_setting,['input','output','user_output'])
-				elif step=='calib':
-					check_step(step,step_setting,['input','output','user_output'])
-				elif step=='rec':
-					check_step(step,step_setting,['input','output'])
-				elif step=='calib_woelec':
-					check_step(step,step_setting,['input','output'])
-				elif step=='rec_woelec':
-					check_step(step,step_setting,['input','output'])
-				else:
-					# step is none of the legit ones above
-					raise JunoScenarioError('%s is not a legit job step.'%step)
-		
-				# if with jobvar splitter, translate some settings to composite_string jobvars
-				for attribute in ['input','output','user_output','additional_args','positions','particles','momentums','volume','material']:
-					if attribute in step_setting:
-						splitter['jobvar_lists'][step+'_'+attribute+'_jobvar']={'type':'composite_string','param':{'value':step_setting.get(attribute)}}
 
+			else:	# step not in juno_prod
+				step_type = step_setting.get('type','')
+				if not step_type:
+					raise JunoScenarioError('Type not specified for step %s in workflow'%(step))
+				# running user script
+				if step_type.lower() in ['userscript','script','user_script','exe','execute_script']:	#step type = run user script
+					script_file = step_setting.get('file','')
+					script_args = step_setting.get('argument','')
+					script_args = step_setting.get('arguments',script_args)
+					script_code = step_setting.get('code','')	
+
+					if script_file:
+						input_sandbox['common'].update({os.path.basename(script_file):os.path.abspath(script_file)})
+						if splitterMode in ['splitByJobvars']:
+							splitter['jobvar_lists'][step+'_argument_jobvar']={'type':'composite_string','param':{'value':script_args}}
+							workflow[step]={'type':'exe','actvar':{'exe':os.path.basename(script_file),'argument_jobvar':step+'_argument_jobvar','location':'common'},'depend_on':p_steps}
+						else:
+							workflow[step]={'type':'exe','actvar':{'exe':os.path.basename(script_file),'argument':script_args,'location':'common'},'depend_on':p_steps}
+						
+					elif script_code:
+						if splitterMode in ['splitByJobvars']:
+							splitter['jobvar_lists'][step+'_code_jobvar']={'type':'composite_string','param':{'value':script_args}}
+							workflow[step]={'type':'run_code','actvar':{'code_jobvar':step+'_code_jobvar'},'depend_on':p_steps}
+						else:
+							workflow[step]={'type':'run_code','actvar':{'code':script_code},'depend_on':p_steps}
+					else:
+						raise JunoScenarioError('Invalid setting for step %s: missing file or code for user script.'%(step))
 			
-			# other necessary args for certain steps
-			if  step == 'elecsim':
-				workflow[step]['actvar']['rate'] = step_setting.get('rate',1)
-			if 'gdml-file' in step_setting:
-				workflow[step]['actvar']['gdml-file'] = step_setting.get('gdml-file')
+				# juno_alg
+				elif step_type.lower() in ['juno_alg','juno_algorithm','algorithm']:
+					soFile=step_setting.get('soFile')
+					jobConfig=step_setting.get('jobConfig')
+					textReplace=step_setting.get('textReplace',{})
+					outputUpload=step_setting.get('outputUpload',[])
+					outputUpload=step_setting.get('uploadOutput',outputUpload)
+
+					if not jobConfig:
+						raise JunoScenarioError('Missing jobConfig in step %s.'%step)
+					if type(textReplace) is not dict:
+						raise JunoScenarioError('The value of textReplace should be a dict. (in step %s)'%step)
+					if type(soFile) is str:
+						soFile=[soFile]
+					elif type(soFile) is not list:
+						raise JunoScenarioError('The value of soFile should be a string or a list. (in step %s)'%step)
+					if type(outputUpload) is str:
+						outputUpload=[outputUpload]
+					elif type(outputUpload) is not list:
+						raise JunoScenarioError('The value of outputUpload should be a string or a list. (in step %s)'%step)
+					
+					dirac_upload_file_list.extend(outputUpload)
+					if splitterMode in ['splitByJobvars']:
+						for k,v in textReplace.items():
+							splitter['jobvar_lists']['alg_rtext_'+str(alg_counter)]={'type':'composite_string','param':{'value':k}}
+							splitter['jobvar_lists']['alg_textr_'+str(alg_counter)]={'type':'composite_string','param':{'value':v}}
+							alg_counter+=1										
+
+					for f in soFile:
+						input_sandbox['common'].update({os.path.basename(f):os.path.abspath(f)})
+					input_sandbox['common'].update({os.path.basename(jobConfig):os.path.abspath(jobConfig)})
+					
+					workflow[step]={'type':'juno_alg','actvar':{'soFile':','.join(soFile),'jobConfig':jobConfig},'depend_on':p_steps}
+					workflow[step]['actvar']['JUNO_top'] = junoTop
+					
+					
+
+				# juno software
+				elif step_type.lower() in ['juno_soft','juno_software','junosoft','junosoftware','junoscript','juno_script']:
+					software=step_setting.get('software')
+					software_args=step_setting.get('argument')
+					software_args=step_setting.get('arguments',software_args)
+					software_args=step_setting.get('arg',software_args)
+					software_args=step_setting.get('args',software_args)
+					if not software:
+						raise JunoScenarioError('Invalid setting for step %s: software not specified.'%(step))
+					
+
+					if splitterMode in ['splitByJobvars']:
+						splitter['jobvar_lists'][step+'_argument_jobvar']={'type':'composite_string','param':{'value':software_args}}
+						workflow[step]={'type':'juno_soft','actvar':{'JUNO_top':junoTop,'software':software,'argument_jobvar':step+'_argument_jobvar'},'depend_on':p_steps}
+					else:
+						workflow[step]={'type':'juno_soft','actvar':{'JUNO_top':junoTop,'software':software,'argument':software_args},'depend_on':p_steps}
+					
+				# executing cmd
+				elif step_type.lower() in ['cmd']:
+					cmd=step_setting.get('cmd')
+					workflow[step]={'type':'cmd','actvar':{'cmd':cmd},'depend_on':p_steps}
+						
+
+				else:	# invalid step type
+					raise JunoScenarioError('Invalid step type (%s) for step %s in workflow'%(step_type,step))
+				
+			workflow_input[step]=deepcopy(step_setting)
+
+		#ends iterating step
 
 
 		if splitterMode in ['splitByEvent']:
@@ -170,6 +295,20 @@ class Juno(object):
 			splitter['jobvarsToSeq']=jobvarsToSeq
 
 	
+		# Condor backend
+		if backend['name'] in ['IHEPCondor','Condor']:
+			condor_setting = self.scenario_input.get('backend',{})
+			taskName=self.scenario_input.get('taskName','')
+			if not isinstance(condor_setting,dict):
+				condor_setting={}
+
+			data_folder=condor_setting.get('dataFolder','./')
+			data_folder=condor_setting.get('outputDir',data_folder)
+			
+			# shall use full path for output
+			for step in workflow:
+				workflow[step]['actvar'].update({'data_folder':data_folder})
+
 		# Dirac backend
 		if backend['name']=='dirac':
 			dirac_setting=self.scenario_input.get('backend',{})
@@ -179,13 +318,38 @@ class Juno(object):
 			# a dirac-upload action in the end, to upload everything:
 			workflow['dirac_upload']={'type':'dirac_upload','actvar':{},'depend_on':job_steps}
 			workflow['dirac_upload']['actvar']['overwrite']=dirac_setting.get('overwrite','True')
-			workflow['dirac_upload']['actvar']['user_home']=dirac_setting.get('userHome','True')
+
+			# outputDir for dir of full path; outputSubDir for subdir in user home.
 			dirac_outputSubDir=dirac_setting.get('outputSubDir',outputSubDir)
-			workflow['dirac_upload']['actvar']['destination_dir']=os.path.join(dirac_outputSubDir,taskName)
-			workflow['dirac_upload']['actvar']['files_to_upload']=os.path.join('*root,*user*,*xml')
-			#todo: a dirac-download action to get input
+			dirac_outputDir=dirac_setting.get('outputDir',outputDir)
+			if dirac_outputDir:
+				workflow['dirac_upload']['actvar']['user_home']='False'
+				if splitterMode in ['splitByJobvars']:
+					splitter['jobvar_lists']['dirac_upload_destination_dir_jobvar']={'type':'composite_string','param':{'value':dirac_outputDir}}
+				else:
+					workflow['dirac_upload']['actvar']['destination_dir']=dirac_outputDir
+				workflow['dirac_upload']['actvar']['files_to_upload']=os.path.join('*root,*user*,*xml')
+			elif dirac_outputSubDir:
+				workflow['dirac_upload']['actvar']['user_home']='True'
+				if splitterMode in ['splitByJobvars']:
+					splitter['jobvar_lists']['dirac_upload_destination_dir_jobvar']={'type':'composite_string','param':{'value':os.path.join(dirac_outputSubDir,taskName)}}
+				else:
+					workflow['dirac_upload']['actvar']['destination_dir']=os.path.join(dirac_outputSubDir,taskName)
+				
+				dirac_upload_file_list.extend(['*root','*user*','*xml'])
+				workflow['dirac_upload']['actvar']['files_to_upload']=','.join(dirac_upload_file_list)
 
 
+			#when input is not from previous steps, use a dirac-download action to get input
+			for step in job_steps:
+				if (step in input_map) and (input_map[step] not in previous_steps):	
+					# in this case, the input shall be the full LFN 
+					workflow[step+'_download_input']={'type':'dirac_download','actvar':{},'depend_on':[]}
+					workflow[step+'_download_input']['actvar']['input_lfn_jobvar_name']=step+'_input_jobvar'
+					workflow[step]['actvar']['dirac_input']='True'
+					workflow[step]['depend_on'].append(step+'_download_input')
+			
+			
 
 
 		#build scenario				

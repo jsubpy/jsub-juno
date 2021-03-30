@@ -17,6 +17,7 @@ eval positions='$JSUB_'$JSUB_step_type'_positions_jobvar'
 eval volume='$JSUB_'$JSUB_step_type'_volume_jobvar'
 eval material='$JSUB_'$JSUB_step_type'_material_jobvar'
 
+
 # for condor backend, the output data should be under certain folder
 data_folder=$JSUB_data_folder
 
@@ -104,24 +105,29 @@ elif [ "$JSUB_step_type" == "calib" ]; then
 	cmd_arg=$cmd_arg'  --user-output '$user_output
 elif [ "$JSUB_step_type" == "rec" ]; then
 	if [ -z "$gdml_file" ]; then
-		gdml_file=`find *gdml`
+		gdml_file=`find |grep gdml`
 	fi
 
 	cmd=$cmd'tut_calib2rec.py'
 	cmd_arg=$cmd_arg'  --evtmax '$evtmax
 	cmd_arg=$cmd_arg'  --input '$input
 	cmd_arg=$cmd_arg'  --output '$output
-	cmd_arg=$cmd_arg'  --gdml-file '$gdml_file
+	cmd_arg=$cmd_arg'  --user-output '$user_output
+	if [ -n "$gdml_file" ]; then
+		cmd_arg=$cmd_arg'  --gdml-file '$gdml_file
+	fi
 elif [ "$JSUB_step_type" == "calib_woelec" ]; then
 	cmd=$cmd'tut_det2calib.py'
 	cmd_arg=$cmd_arg'  --evtmax '$evtmax
 	cmd_arg=$cmd_arg'  --input '$input
 	cmd_arg=$cmd_arg'  --output '$output
+#	cmd_arg=$cmd_arg'  --user-output '$user_output
 elif [ "$JSUB_step_type" == "rec_woelec" ]; then
 	cmd=$cmd'tut_calib2rec.py'
 	cmd_arg=$cmd_arg'  --evtmax '$evtmax
 	cmd_arg=$cmd_arg'  --input '$input
 	cmd_arg=$cmd_arg'  --output '$output
+#	cmd_arg=$cmd_arg'  --user-output '$user_output
 	if [ -n "$gdml_file" ]; then
 		cmd_arg=$cmd_arg'  --gdml-file '$gdml_file
 	fi

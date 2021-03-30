@@ -1,0 +1,27 @@
+Metadata-Version: 1.1
+Name: jsub-juno
+Version: 0.1.0.dev1
+Summary: JSUB extension for JUNO experiment
+Home-page: https://jsubpy.github.io/exts/
+Author: Yifan Yang
+Author-email: yangyf@ihep.ac.cn
+License: MIT
+Description: jsub-juno
+        #########
+        
+        JSUB extension for JUNO experment
+        
+Keywords: jsub extension juno
+Platform: UNKNOWN
+Classifier: Development Status :: 2 - Pre-Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: System :: Distributed Computing
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 2
+Classifier: Programming Language :: Python :: 2.6
+Classifier: Programming Language :: Python :: 2.7
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.3
+Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+### Somehow not working. Use juno_prod.sh instead.
+
 '''
 This action module runs the production scripts in $TUTORIALROOT/share/
 '''
